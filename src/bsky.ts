@@ -1,6 +1,7 @@
 import { AtpAgentLoginOpts, BskyAgent } from "@atproto/api";
 import fs from "fs";
 import os from "os";
+import { Command } from "commander";
 
 type PostRef = { uri: string, cid: string }
 type LocationInfo = { post_info: PostRef, thread_root: PostRef }
@@ -22,9 +23,9 @@ function load_history(): LocationInfo {
 interface PostData {
     text: string,
     replying_to?: LocationInfo,
-    quoting?: PostRef
+    quoting?: PostRef,
 }
-async function makePost({text, replying_to, quoting}: PostData): Promise<void> {
+/*async function makePost({text, replying_to, quoting}: PostData): Promise<void> {
     // compose post record
     let post_record: any = {
         text: text,
@@ -57,34 +58,59 @@ async function makePost({text, replying_to, quoting}: PostData): Promise<void> {
 
     // save post to history file
     fs.writeFileSync(historyLocation, JSON.stringify(post_info))
+}*/
+function makePost(postData: PostData) {
+    console.log(postData)
 }
 
+/*
 const agent = new BskyAgent({
   service: "https://bsky.social",
 });
 
 await agent.login(load_auth());
+*/
 
-const command = process.argv[2];
-const args = process.argv.slice(3);
-let post_text = args.join(" ")
+const program = new Command()
+program
+    .version('1.0.0')
+    .description('A CLI tool for creating posts');
 
-switch (command) {
-    case "post":
-        makePost({ text: post_text });
-        break;
+program
+    .command('post <text...>')
+    .description('Create a new post')
+    .action((text, options) => {
+      const postData: PostData = {
+        text: text.join(' '),
+      };
+      makePost(postData);
+    });
 
-    case "append":
-        const last_post = load_history()
-        makePost({ text: post_text, replying_to: last_post })
-        break;
+program
+    .command('append <text...>')
+    .description('reply to the last created post')
+    .action((text, options) => {
+      const postData: PostData = {
+        text: text.join(' '),
+        replying_to: load_history()
+      };
+      makePost(postData);
+    });
 
-    case "quote":
-        const quoting_post = load_history().post_info
-        makePost({ text: post_text, quoting: quoting_post })
-        break;
+program
+    .command('quote <text...>')
+    .description('quote the last created post')
+    .action((text, options) => {
+      const postData: PostData = {
+        text: text.join(' '),
+        quoting: load_history().post_info
+      };
+      makePost(postData);
+    });
 
-    default:
-        console.log("command not recognized: " + command)
-        console.log("commands: post, append")
+program.parse(process.argv);
+
+// If no command is provided, show help
+if (!process.argv.slice(2).length) {
+  program.outputHelp();
 }
