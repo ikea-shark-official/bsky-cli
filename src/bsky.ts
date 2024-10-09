@@ -19,7 +19,12 @@ function load_history(): LocationInfo {
     return JSON.parse(fileContents);
 }
 
-async function makePost(text: string, replying_to?: LocationInfo): Promise<void> {
+interface PostData {
+    text: string,
+    replying_to?: LocationInfo,
+    quoting?: PostRef
+}
+async function makePost({text, replying_to, quoting}: PostData): Promise<void> {
     // compose post record
     let post_record: any = {
         text: text,
@@ -30,6 +35,13 @@ async function makePost(text: string, replying_to?: LocationInfo): Promise<void>
         post_record.reply = {
             root: replying_to.thread_root,
             parent: replying_to.post_info
+        }
+    }
+
+    if (quoting !== undefined) {
+        post_record.embed = {
+            $type: "app.bsky.embed.record",
+            record: quoting
         }
     }
 
@@ -59,12 +71,18 @@ let post_text = args.join(" ")
 
 switch (command) {
     case "post":
-        makePost(post_text);
+        makePost({ text: post_text });
         break;
 
     case "append":
         const last_post = load_history()
-        makePost(post_text, last_post)
+        makePost({ text: post_text, replying_to: last_post })
+        break;
+
+    case "quote":
+        const quoting_post = load_history().post_info
+        makePost({ text: post_text, quoting: quoting_post })
+        break;
 
     default:
         console.log("command not recognized: " + command)

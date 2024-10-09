@@ -1,0 +1,32 @@
+ok so, one core function:
+    bsky post the words in this go here
+    bsky post @voidlinux.mom hi 🥺
+    bsky post https://claude.ai
+
+image handling
+
+i want media posts to work by just pulling off the code line, or with flags:
+    bsky post ./thomas_merton_quote.png real poster energy right here
+    bsky post --image ./thomas_merton_quote.png real poster energy right here
+    bsky post --image thomas_merton_quote.png real poster energy right here
+    bsky post --image thomas_merton_quote.png --alt "Then a continual Mass, a deep and urgent sense of identification with an act of incomprehensible scope and magnitude that somehow has its focus in the center of your own soul, pursues you wherever you go; and in all situations of your daily life it makes upon you secret and insistent demands for agreement and consent.\n This truth is so tremendous that it is somehow neutral. It cannot be expressed. It is entirely personal. And you have no special desire to tell anybody about it. It is nobody else’s business." real poster energy right here
+
+and at the back end too
+    bsky post real poster energy right here ./thomas_merton_quote.png
+    bsky post real poster energy right here --image ./thomas_merton_quote.png
+    bsky post real poster energy right here --image thomas_merton_quote.png
+    bsky post real poster energy right here --image thomas_merton_quote.png --alt "not doing that again"
+
+limiting flag/media detection to the beginning and end of it seems like the call
+    bsky post i feel very anime_girl.png right now [posts text]
+    bsky post anime_girl.png this is so jillcore [posts image]
+    bsky post i thought trying to post here --image this_file.png would help [wait fuck this is reasonable isn't it]
+
+i think the best solution is to treat everything with "--image _" or "[.~]/text" as an image and ignore things that are just like "image.png". we could also add a failsafe but that seems a little overboard
+
+i think --image, --video work well. so should detecting tenor links
+    bsky post so true!! [--gif] tenor.com/black_woman.jpg
+
+quotes handling
+bsky post "One day you wake up and realize religion is ridiculous and that you will stick with it anyway. What love is ever any different?" - cam's mastodon bio
+    (both the quote block and the apostrophe make it complicated. there's probably stuff inter-shell to do here)
