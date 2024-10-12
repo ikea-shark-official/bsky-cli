@@ -1,7 +1,8 @@
 import { AtpAgentLoginOpts, BskyAgent } from "@atproto/api";
-import fs from "fs";
-import os from "os";
+import fs from "node:fs";
+import os from "node:os";
 import { Command } from "commander";
+import { argv } from "node:process";
 
 type PostRef = { uri: string, cid: string }
 type LocationInfo = { post_info: PostRef, thread_root: PostRef }
@@ -108,9 +109,9 @@ program
       makePost(postData);
     });
 
-program.parse(process.argv);
+program.parse(argv);
 
 // If no command is provided, show help
-if (!process.argv.slice(2).length) {
+if (!argv.slice(2).length) {
   program.outputHelp();
 }
