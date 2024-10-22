@@ -167,43 +167,24 @@ function collect(value: string, previous: string[]): string[] {
     return previous.concat([value])
 }
 
-program
-    .command('post <text...>')
-    .description('Create a new post')
-    .option('-i, --image <path>', "path of image to upload", collect, [])
-    .action((text, options) => {
-      const postData: PostData = {
-        text: text.join(' '),
-        images: options.image,
-      };
-      makePost(postData);
-    });
+function makeCommand(name: string, description: string, extraData?: () => Partial<PostData>) {
+    program
+      .command(`${name} <text ...>`)
+      .command(description)
+      .option('-i, --image <path>', "path of image to upload", collect, [])
+      .action((text, options) => {
+          const baseData: PostData = {
+            text: text.join(' '),
+            images: options.image,
+          }
 
-program
-    .command('append <text...>')
-    .description('reply to the last created post')
-    .option('-i, --image <path>', "path of image to upload", collect, [])
-    .action((text, options) => {
-      const postData: PostData = {
-        text: text.join(' '),
-        replying_to: load_history(),
-        images: options.image,
-      };
-      makePost(postData);
-    });
+          makePost({...baseData, ...extraData})
+      })
+}
 
-program
-    .command('quote <text...>')
-    .description('quote the last created post')
-    .option('-i, --image <path>', "path of image to upload", collect, [])
-    .action((text, options) => {
-      const postData: PostData = {
-        text: text.join(' '),
-        quoting: load_history().post_info,
-        images: options.image,
-      };
-      makePost(postData);
-    });
+makeCommand("post", "create a new post")
+makeCommand("append", 'reply to the last created post', () => ({ replying_to: load_history() }))
+makeCommand("quote", "quote the last created post", () => ({ quoting: load_history().post_info }))
 
 program
     .command('switch [account]')
