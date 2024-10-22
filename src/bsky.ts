@@ -14,13 +14,11 @@ const historyLocation = configDir + '/history.json'
 const authLocation = configDir + "/auth.json";
 
 function load_auth(): AtpAgentLoginOpts {
-    console.log("loading auth")
     const fileContents = fs.readFileSync(authLocation, "utf-8");
     return JSON.parse(fileContents);
 }
 
 function load_history(): LocationInfo {
-    console.log("loading history")
     const fileContents = fs.readFileSync(historyLocation, "utf-8");
     return JSON.parse(fileContents);
 }
