@@ -2,7 +2,7 @@ import { AtpAgentLoginOpts, BlobRef, BskyAgent } from "@atproto/api";
 import fs from "node:fs";
 import os from "node:os";
 import { Command } from "commander";
-import process, { exit } from "node:process";
+import process from "node:process";
 import path from "node:path";
 import mime from "mime";
 
@@ -13,10 +13,60 @@ const configDir = os.homedir() + "/.bsky-cli";
 const historyLocation = configDir + '/history.json'
 const authLocation = configDir + "/auth.json";
 
+function exit(msg: string) {
+  console.log(msg)
+  process.exit(0)
+}
+
+type AccountInfo = AtpAgentLoginOpts & {active: boolean}
+type AuthInfo = { accounts : AccountInfo[], lastActive: string}
+
+function get_active_account(authInfo: AuthInfo): AccountInfo {
+    return authInfo.accounts.filter((account) => { return account.active })[0]
+}
+
 function load_auth(): AtpAgentLoginOpts {
     const fileContents = fs.readFileSync(authLocation, "utf-8");
-    return JSON.parse(fileContents);
+    const authInfo: AuthInfo = JSON.parse(fileContents);
+    return get_active_account(authInfo)
 }
+
+function change_active_account(newAccount: string | undefined) {
+    const fileContents = fs.readFileSync(authLocation, "utf-8");
+    const authInfo: AuthInfo = JSON.parse(fileContents);
+    const startingActiveAccount = get_active_account(authInfo).identifier
+
+    if (newAccount == startingActiveAccount) {
+      exit("you are already using " + newAccount)
+    }
+
+    // switch to the last account we used if nothing is given
+    if (newAccount == undefined) {
+      newAccount = authInfo.lastActive
+    }
+
+    // start updating authinfo
+    authInfo.lastActive = startingActiveAccount
+
+    // change the active flags to make newAccount active
+    for (const account of authInfo.accounts) {
+      if (account.identifier == newAccount) {
+        account.active = true
+      } else {
+        account.active = false
+      }
+    }
+
+    // "some" is what haskell calls "any" fwiw
+    if (!authInfo.accounts.some((acc) => acc.active)) {
+      exit("the account name you gave didn't match any accounts in the authfile. check you got the spelling right")
+    }
+
+    fs.writeFileSync(authLocation, JSON.stringify(authInfo))
+    console.log("switched account from " + authInfo.lastActive + " to " + newAccount)
+}
+
+
 
 function load_history(): LocationInfo {
     const fileContents = fs.readFileSync(historyLocation, "utf-8");
@@ -24,7 +74,7 @@ function load_history(): LocationInfo {
 }
 
 // upload images blobs and return the, uh, idk what to call it. app.bsky.embed.image record?
-async function image_embed(images: string[]) {
+async function image_embed(images: string[], agent: BskyAgent) {
   const blobs: BlobRef[] = [] //ew
   for (const image of images) {
     // strip image metadata
@@ -60,6 +110,12 @@ interface PostData {
     images?: string[]
 }
 async function makePost({text, replying_to, quoting, images}: PostData): Promise<void> {
+    // login to bsky
+    const agent = new BskyAgent({
+      service: "https://bsky.social",
+    });
+    await agent.login(load_auth());
+
     // compose post record
     const post_record: any = {
         text: text,
@@ -79,12 +135,12 @@ async function makePost({text, replying_to, quoting, images}: PostData): Promise
       post_record.embed = {
         $type: "app.bsky.embed.recordWithMedia",
         record: quote_embed(quoting),
-        media: await image_embed(images)
+        media: await image_embed(images, agent)
       }
     } else if (quoting !== undefined) {
       post_record.embed = quote_embed(quoting)
     } else if (image_post) {
-      post_record.embed = await image_embed(images)
+      post_record.embed = await image_embed(images, agent)
     }
 
     // post
@@ -100,13 +156,6 @@ async function makePost({text, replying_to, quoting, images}: PostData): Promise
     // save post to history file
     fs.writeFileSync(historyLocation, JSON.stringify(post_info))
 }
-
-
-const agent = new BskyAgent({
-  service: "https://bsky.social",
-});
-
-await agent.login(load_auth());
 
 
 const program = new Command()
@@ -155,6 +204,11 @@ program
       };
       makePost(postData);
     });
+
+program
+    .command('switch [account]')
+    .description("switch to the named account, or the last one used if unspecified")
+    .action(change_active_account)
 
 program.parse(process.argv);
 

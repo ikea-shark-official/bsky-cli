@@ -4,10 +4,7 @@ make a folder ~/.bsky-cli (you can change this in the source file if u want)
 
 make a file ~/.bsky-cli/auth.json that looks like this
 ```
-{
-  "identifier": "<username>",
-  "password": "<app password>"
-}
+(uh this might be in flux)
 ```
 
 then run
