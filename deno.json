@@ -5,6 +5,7 @@
   "imports": {
     "@atproto/api": "npm:@atproto/api@^0.13.12",
     "commander": "npm:commander@^12.1.0",
+    "enquirer": "npm:enquirer@^2.4.1",
     "mime": "npm:mime@^4.0.4"
   }
 }

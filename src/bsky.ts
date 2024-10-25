@@ -5,6 +5,7 @@ import { Command } from "commander";
 import process from "node:process";
 import path from "node:path";
 import mime from "mime";
+import enquirer from "enquirer";
 
 type PostRef = { uri: string; cid: string };
 type LocationInfo = { post_info: PostRef; thread_root: PostRef };
@@ -182,23 +183,30 @@ function collect(value: string, previous: string[]): string[] {
 function makeCommand(
   name: string,
   description: string,
-  extraData?: () => Partial<PostData>,
+  extraData: () => Partial<PostData>,
 ) {
   program
-    .command(`${name} <text...>`)
+    .command(`${name}`)
     .description(description)
-    .option("-i, --image <path>", "path of image to upload", collect, [])
-    .action((text, options) => {
-      const baseData: PostData = {
-        text: text.join(" "),
-        images: options.image,
-      };
+    // .option("-i, --image <path>", "path of image to upload", collect, [])
+    .action((_options) => {
+      const prompt = new enquirer.Input({
+      })
 
-      makePost({ ...baseData, ...extraData });
+      prompt.run()
+        .then(async (text: string) => {
+          const baseData: PostData = {
+            text: text,
+          };
+
+          await makePost({ ...baseData, ...extraData() });
+          process.exit(0) // TODO, is this the best way to handle this?
+        })
+        .catch(console.log)
     });
 }
 
-makeCommand("post", "create a new post");
+makeCommand("post", "create a new post", () => ({}));
 makeCommand(
   "append",
   "reply to the last created post",
