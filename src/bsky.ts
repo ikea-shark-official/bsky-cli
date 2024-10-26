@@ -1,7 +1,7 @@
 import { AtpAgentLoginOpts, BlobRef, BskyAgent } from "@atproto/api";
 import fs from "node:fs";
 import os from "node:os";
-import { Command } from "commander";
+import { Argument, Command } from "commander";
 import process from "node:process";
 import path from "node:path";
 import mime from "mime";
@@ -12,6 +12,13 @@ const { prompt } = enquirer;
 function exit(msg: string): never {
   console.log(msg);
   process.exit(-1);
+}
+
+function readJson<T>(path: string): T {
+  return JSON.parse(fs.readFileSync(path, 'utf-8'))
+}
+function writeJson<T>(path: string, value:T): void {
+  fs.writeFileSync(path, JSON.stringify(value))
 }
 
 
@@ -35,8 +42,8 @@ function get_active_account(authInfo: AuthInfo): AccountInfo {
 }
 
 function load_auth(): AuthInfo {
-  const authInfo: AccountInfo[] = JSON.parse(fs.readFileSync(authLocation, "utf-8"));
-  const authStatus: AuthStatus = JSON.parse(fs.readFileSync(authStatusLocation, "utf-8"))
+  const authInfo: AccountInfo[] = readJson(authLocation)
+  const authStatus: AuthStatus = readJson(authStatusLocation)
   return { accounts: authInfo, ...authStatus }
 }
 
@@ -63,16 +70,55 @@ function change_active_account(newAccount: string | undefined) {
 
   next.lastActive = prev.currentlyActive
 
-  fs.writeFileSync(authStatusLocation, JSON.stringify(next as AuthStatus))
+  writeJson(authStatusLocation, next as AuthStatus)
   console.log(
     "switched account from " + prev.currentlyActive + " to " + next.currentlyActive,
   );
 }
 
+function list_accounts() {
+  for (const account of load_auth().accounts) {
+    console.log(account.identifier)
+  }
+}
+
+async function add_account() {
+  const accountInfo = await prompt ([
+    {
+      type: 'input',
+      name: 'identifier',
+      message: 'username'
+    },
+    {
+      type: 'invisible',
+      name: 'password',
+      message: 'password:'
+    }
+  ]) as AccountInfo
+
+  const { accounts } = load_auth()
+  accounts.push(accountInfo)
+  writeJson(authLocation, accounts)
+  process.exit(0)
+}
+
+async function remove_account() {
+  const { accounts } = load_auth()
+  const { removing } = await prompt({
+    type: 'select',
+    choices: accounts.map((acc) => (acc.identifier)),
+    initial: 0,
+    name: 'removing',
+    message: 'select account to remove [TODO you may need to hit spacebar after you move and idk why. im leaving this library next commit maybe]'
+  }) as { removing: string }
+
+  const newAccounts = accounts.filter((acc) => (acc.identifier != removing))
+  writeJson(authLocation, newAccounts)
+  process.exit(0)
+}
 
 function load_history(): LocationInfo {
-  const fileContents = fs.readFileSync(historyLocation, "utf-8");
-  return JSON.parse(fileContents);
+  return readJson(historyLocation)
 }
 
 // upload images blobs and return the, uh, idk what to call it. app.bsky.embed.image record?
@@ -163,7 +209,7 @@ async function makePost(
   };
 
   // save post to history file
-  fs.writeFileSync(historyLocation, JSON.stringify(post_info));
+  writeJson(historyLocation, post_info)
 }
 
 
@@ -219,7 +265,18 @@ program
   .action(change_active_account);
 
 program
-  .command("check [account]");
+  .command('accounts')
+  .addArgument(new Argument('[command]').choices(['add', 'remove']))
+  .description("list accounts, or add/remove with 'accounts [add/remove]'")
+  .action((command) => {
+    if (command == undefined) {
+      list_accounts()
+    } else if (command == 'add') {
+      add_account()
+    } else if (command == 'remove') {
+      remove_account()
+    }
+  })
 
 program.parse(process.argv);
 
