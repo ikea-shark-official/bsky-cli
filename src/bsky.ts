@@ -96,6 +96,16 @@ async function add_account() {
     }
   ]) as AccountInfo
 
+  // make sure we can load account
+  try {
+    const agent = new BskyAgent({
+      service: "https://bsky.social",
+    });
+    await agent.login(accountInfo);
+  } catch {
+    exit("could not login to bluesky with given info. please check that it's correct")
+  }
+
   const { accounts } = load_auth()
   accounts.push(accountInfo)
   writeJson(authLocation, accounts)
@@ -109,7 +119,7 @@ async function remove_account() {
     choices: accounts.map((acc) => (acc.identifier)),
     initial: 0,
     name: 'removing',
-    message: 'select account to remove [TODO you may need to hit spacebar after you move and idk why. im leaving this library next commit maybe]'
+    message: 'select account to remove'
   }) as { removing: string }
 
   const newAccounts = accounts.filter((acc) => (acc.identifier != removing))
@@ -272,7 +282,13 @@ program
     if (command == undefined) {
       list_accounts()
     } else if (command == 'add') {
-      add_account()
+      const configFiles = [configDir, authLocation, historyLocation, authStatusLocation]
+      if (configFiles.every(fs.existsSync)) {
+        add_account() // standard account adding procedure
+      } else {
+        // TODO
+        exit("missing needed config files, but account initialization doesn't exist yet")
+      }
     } else if (command == 'remove') {
       remove_account()
     }
