@@ -6,6 +6,7 @@ import process from "node:process";
 import path from "node:path";
 import mime from "mime";
 import enquirer from "enquirer";
+const { prompt } = enquirer;
 
 type PostRef = { uri: string; cid: string };
 type LocationInfo = { post_info: PostRef; thread_root: PostRef };
@@ -14,9 +15,9 @@ const configDir = os.homedir() + "/.bsky-cli";
 const historyLocation = configDir + "/history.json";
 const authLocation = configDir + "/auth.json";
 
-function exit(msg: string) {
+function exit(msg: string): never {
   console.log(msg);
-  process.exit(0);
+  process.exit(-1);
 }
 
 type AccountInfo = AtpAgentLoginOpts & { active: boolean };
@@ -84,10 +85,7 @@ async function image_embed(images: string[], agent: BskyAgent) {
     // check that image mimetype is valid
     const mimetype = mime.getType(path.basename(image));
     if (mimetype === null) {
-      exit(
-        "mimetype not found for " + image +
-          ". check that it has an image extension",
-      );
+      exit("mimetype not found for " + image + ". check that it has an image extension");
     } else if (mimetype.split("/")[0] !== "image") {
       exit("invalid mimetype for an image post: " + mimetype);
     }
@@ -176,10 +174,6 @@ program
   .version("1.0.0")
   .description("A CLI tool for creating posts");
 
-function collect(value: string, previous: string[]): string[] {
-  return previous.concat([value]);
-}
-
 function makeCommand(
   name: string,
   description: string,
@@ -189,21 +183,20 @@ function makeCommand(
     .command(`${name}`)
     .description(description)
     // .option("-i, --image <path>", "path of image to upload", collect, [])
-    .action((_options) => {
-      const prompt = new enquirer.Input({
-      })
+    .action(async (_options) => {
+      const response = await prompt({
+        type: 'input',
+        name: 'text',
+        message: "post text:"
+      }) as { text: string };
 
-      prompt.run()
-        .then(async (text: string) => {
-          const baseData: PostData = {
-            text: text,
-          };
+      const baseData: PostData = {
+        text: response.text ,
+      };
 
-          await makePost({ ...baseData, ...extraData() });
-          process.exit(0) // TODO, is this the best way to handle this?
-        })
-        .catch(console.log)
-    });
+      await makePost({ ...baseData, ...extraData() });
+      process.exit(0) // TODO, is this the best way to handle this?
+    })
 }
 
 makeCommand("post", "create a new post", () => ({}));
