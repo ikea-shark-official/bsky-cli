@@ -8,67 +8,64 @@ import mime from "mime";
 import enquirer from "enquirer";
 const { prompt } = enquirer;
 
-type PostRef = { uri: string; cid: string };
-type LocationInfo = { post_info: PostRef; thread_root: PostRef };
-
-const configDir = os.homedir() + "/.bsky-cli";
-const historyLocation = configDir + "/history.json";
-const authLocation = configDir + "/auth.json";
 
 function exit(msg: string): never {
   console.log(msg);
   process.exit(-1);
 }
 
-type AccountInfo = AtpAgentLoginOpts & { active: boolean };
-type AuthInfo = { accounts: AccountInfo[]; lastActive: string };
+
+type PostRef = { uri: string; cid: string };
+type LocationInfo = { post_info: PostRef; thread_root: PostRef };
+
+const configDir = os.homedir() + "/.bsky-cli";
+const historyLocation = configDir + "/post_history.json";
+const authLocation = configDir + "/auth.json";
+const authStatusLocation = configDir + "/account_status.json"
+
+type AccountInfo = AtpAgentLoginOpts; // identifier/password
+type AuthStatus = { currentlyActive: string, lastActive: string } // stored in account_status.json
+
+type AuthInfo = { accounts: AccountInfo[] } & AuthStatus
 
 function get_active_account(authInfo: AuthInfo): AccountInfo {
-  return authInfo.accounts.filter((account) => { return account.active; })[0];
+  return authInfo.accounts
+    .filter((account) => { return (account.identifier == authInfo.currentlyActive)})
+    [0];
 }
 
-function load_auth(): AtpAgentLoginOpts {
-  const fileContents = fs.readFileSync(authLocation, "utf-8");
-  const authInfo: AuthInfo = JSON.parse(fileContents);
-  return get_active_account(authInfo);
+function load_auth(): AuthInfo {
+  const authInfo: AccountInfo[] = JSON.parse(fs.readFileSync(authLocation, "utf-8"));
+  const authStatus: AuthStatus = JSON.parse(fs.readFileSync(authStatusLocation, "utf-8"))
+  return { accounts: authInfo, ...authStatus }
 }
 
 function change_active_account(newAccount: string | undefined) {
-  const fileContents = fs.readFileSync(authLocation, "utf-8");
-  const authInfo: AuthInfo = JSON.parse(fileContents);
-  const startingActiveAccount = get_active_account(authInfo).identifier;
+  const authInfo = load_auth()
+  console.log(authInfo)
 
-  if (newAccount == startingActiveAccount) {
+  const prev: AuthStatus = authInfo
+  let next: Partial<AuthStatus> = { currentlyActive: newAccount };
+
+  if (newAccount == prev.currentlyActive) {
     exit("you are already using " + newAccount);
   }
 
   // switch to the last account we used if nothing is given
-  if (newAccount == undefined) {
-    newAccount = authInfo.lastActive;
+  if (next.currentlyActive == undefined) {
+    next.currentlyActive = prev.lastActive;
   }
 
-  // start updating authinfo
-  authInfo.lastActive = startingActiveAccount;
-
-  // change the active flags to make newAccount active
-  for (const account of authInfo.accounts) {
-    if (account.identifier == newAccount) {
-      account.active = true;
-    } else {
-      account.active = false;
-    }
+  const accountNames: string[] = authInfo.accounts.map((acc) => (acc.identifier))
+  if (!accountNames.includes(next.currentlyActive)) {
+    exit("given account name not found in auth.json")
   }
 
-  // "some" is what haskell calls "any" fwiw
-  if (!authInfo.accounts.some((acc) => acc.active)) {
-    exit(
-      "the account name you gave didn't match any accounts in the authfile. check you got the spelling right",
-    );
-  }
+  next.lastActive = prev.currentlyActive
 
-  fs.writeFileSync(authLocation, JSON.stringify(authInfo));
+  fs.writeFileSync(authStatusLocation, JSON.stringify(next as AuthStatus))
   console.log(
-    "switched account from " + authInfo.lastActive + " to " + newAccount,
+    "switched account from " + prev.currentlyActive + " to " + next.currentlyActive,
   );
 }
 
@@ -125,7 +122,7 @@ async function makePost(
   const agent = new BskyAgent({
     service: "https://bsky.social",
   });
-  await agent.login(load_auth());
+  await agent.login(get_active_account(load_auth()));
 
   // compose post record
   const post_record: any = {
