@@ -35,6 +35,19 @@ type AuthStatus = { currentlyActive: string, lastActive: string } // stored in a
 
 type AuthInfo = { accounts: AccountInfo[] } & AuthStatus
 
+async function first_run() {
+  fs.mkdirSync(configDir, { recursive: true })
+  fs.writeFileSync(historyLocation, '') // history file is just empty
+
+  const accountInfo = await add_account(true)
+  const authStatus: AuthStatus = {
+    currentlyActive: accountInfo.identifier,
+    lastActive: accountInfo.identifier
+  }
+  writeJson(authStatusLocation, authStatus)
+  process.exit(0)
+}
+
 function get_active_account(authInfo: AuthInfo): AccountInfo {
   return authInfo.accounts
     .filter((account) => { return (account.identifier == authInfo.currentlyActive)})
@@ -49,7 +62,6 @@ function load_auth(): AuthInfo {
 
 function change_active_account(newAccount: string | undefined) {
   const authInfo = load_auth()
-  console.log(authInfo)
 
   const prev: AuthStatus = authInfo
   let next: Partial<AuthStatus> = { currentlyActive: newAccount };
@@ -82,7 +94,7 @@ function list_accounts() {
   }
 }
 
-async function add_account() {
+async function ask_account_info(allowCancel: boolean): Promise<AccountInfo> {
   const accountInfo = await prompt ([
     {
       type: 'input',
@@ -96,20 +108,54 @@ async function add_account() {
     }
   ]) as AccountInfo
 
-  // make sure we can load account
+  console.log("testing password by connecting to bluesky")
   try {
     const agent = new BskyAgent({
       service: "https://bsky.social",
     });
     await agent.login(accountInfo);
   } catch {
-    exit("could not login to bluesky with given info. please check that it's correct")
+    if (allowCancel) {
+      console.log('connection unsuccesful')
+      const { again } = await prompt({
+        type: 'confirm',
+        name: 'again',
+        message: 'try again?'
+      }) as { again: boolean };
+
+      if (!again) { process.exit(0) }
+    } else {
+      console.log("username/password invalid. try again")
+    }
+
+    return ask_account_info(allowCancel)
   }
 
-  const { accounts } = load_auth()
+  console.log("credentials confirmed")
+  return accountInfo
+}
+
+async function add_account(firstRun?: boolean): Promise<AccountInfo> {
+  firstRun = (firstRun != undefined) ? firstRun : false
+
+  // we don't want the user to be able to quit on the first run and fuck it up
+  const allowExiting = firstRun? false : true
+  const accountInfo = await ask_account_info(allowExiting)
+
+  let accounts: AccountInfo[]
+  if (firstRun) {
+    accounts = []
+  } else {
+    ({ accounts } = load_auth())
+  }
+
   accounts.push(accountInfo)
   writeJson(authLocation, accounts)
-  process.exit(0)
+  if (firstRun) {
+    return accountInfo
+  } else {
+    process.exit(0)
+  }
 }
 
 async function remove_account() {
@@ -286,8 +332,7 @@ program
       if (configFiles.every(fs.existsSync)) {
         add_account() // standard account adding procedure
       } else {
-        // TODO
-        exit("missing needed config files, but account initialization doesn't exist yet")
+        first_run()
       }
     } else if (command == 'remove') {
       remove_account()
