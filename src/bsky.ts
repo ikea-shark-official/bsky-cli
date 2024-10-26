@@ -117,12 +117,13 @@ interface PostData {
 }
 async function makePost(
   { text, replying_to, quoting, images }: PostData,
+  auth: AuthInfo
 ): Promise<void> {
   // login to bsky
   const agent = new BskyAgent({
     service: "https://bsky.social",
   });
-  await agent.login(get_active_account(load_auth()));
+  await agent.login(get_active_account(auth));
 
   // compose post record
   const post_record: any = {
@@ -181,17 +182,19 @@ function makeCommand(
     .description(description)
     // .option("-i, --image <path>", "path of image to upload", collect, [])
     .action(async (_options) => {
+      const auth = load_auth()
+
       const response = await prompt({
         type: 'input',
         name: 'text',
-        message: "post text:"
+        message: `${auth.currentlyActive}>`
       }) as { text: string };
 
       const baseData: PostData = {
         text: response.text ,
       };
 
-      await makePost({ ...baseData, ...extraData() });
+      await makePost({ ...baseData, ...extraData() }, auth);
       process.exit(0) // TODO, is this the best way to handle this?
     })
 }
