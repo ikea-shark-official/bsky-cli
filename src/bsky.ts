@@ -1,5 +1,4 @@
 import {
-  AtpAgentLoginOpts,
   BlobRef,
   AtpAgent,
   AppBskyFeedPost,
@@ -15,7 +14,6 @@ import path from "node:path";
 import mime from "mime";
 import enquirer from "enquirer";
 const { prompt } = enquirer;
-
 
 function exit(msg: string): never {
   console.log(msg);
@@ -38,8 +36,8 @@ const historyLocation = configDir + "/post_history.json";
 const authLocation = configDir + "/auth.json";
 const authStatusLocation = configDir + "/account_status.json"
 
-type AccountInfo = AtpAgentLoginOpts; // identifier/password
-type AuthStatus = { currentlyActive: string, lastActive: string } // stored in account_status.json
+type AccountInfo = { handle: string, did: string, password: string };
+type AuthStatus = { currentDid: string, lastAccountDid: string } // stored in account_status.json
 
 type AuthInfo = { accounts: AccountInfo[] } & AuthStatus
 
@@ -49,17 +47,22 @@ async function first_run() {
 
   const accountInfo = await add_account(true)
   const authStatus: AuthStatus = {
-    currentlyActive: accountInfo.identifier,
-    lastActive: accountInfo.identifier
+    currentDid: accountInfo.did,
+    lastAccountDid: accountInfo.did
   }
   writeJson(authStatusLocation, authStatus)
   process.exit(0)
 }
 
-function get_active_account(authInfo: AuthInfo): AccountInfo {
-  return authInfo.accounts
-    .filter((account) => { return (account.identifier == authInfo.currentlyActive)})
-    [0];
+function get_handle_by_did({accounts}: AuthInfo, did: string) {
+  return accounts.filter((a) => (a.did == did))[0].handle
+}
+function get_did_by_handle({accounts}: AuthInfo, handle: string) {
+  return accounts.filter((a) => (a.handle == handle))[0].did
+}
+
+function get_active_account({accounts, currentDid}: AuthInfo): AccountInfo {
+  return accounts.filter((a) => (a.did == currentDid))[0];
 }
 
 function load_auth(): AuthInfo {
@@ -68,42 +71,48 @@ function load_auth(): AuthInfo {
   return { accounts: authInfo, ...authStatus }
 }
 
-function change_active_account(newAccount: string | undefined) {
+function change_active_account(newHandle: string | undefined) {
   const authInfo = load_auth()
-
   const prev: AuthStatus = authInfo
-  let next: Partial<AuthStatus> = { currentlyActive: newAccount };
 
-  if (newAccount == prev.currentlyActive) {
-    exit("you are already using " + newAccount);
+  const nextDid = newHandle != undefined
+    ? get_did_by_handle(authInfo, newHandle)
+    : prev.lastAccountDid
+
+  const next: Partial<AuthStatus> = { currentDid: nextDid };
+
+  if (next.currentDid == prev.currentDid) {
+    exit("you are already using " + newHandle);
   }
 
   // switch to the last account we used if nothing is given
-  if (next.currentlyActive == undefined) {
-    next.currentlyActive = prev.lastActive;
+  if (next.currentDid == undefined) {
+    next.currentDid = prev.lastAccountDid;
   }
 
-  const accountNames: string[] = authInfo.accounts.map((acc) => (acc.identifier))
-  if (!accountNames.includes(next.currentlyActive)) {
+  const dids: string[] = authInfo.accounts.map((acc) => (acc.did))
+  if (!dids.includes(next.currentDid)) {
     exit("given account name not found in auth.json")
   }
 
-  next.lastActive = prev.currentlyActive
+  next.lastAccountDid = prev.currentDid
 
   writeJson(authStatusLocation, next as AuthStatus)
   console.log(
-    "switched account from " + prev.currentlyActive + " to " + next.currentlyActive,
+    "switched account from " + get_handle_by_did(authInfo, prev.currentDid) +
+                      " to " + get_handle_by_did(authInfo, next.currentDid)
   );
 }
 
+// print active accounts to terminal, for `bsky accounts`
 function list_accounts() {
   for (const account of load_auth().accounts) {
-    console.log(account.identifier)
+    console.log(account.handle)
   }
 }
 
 async function ask_account_info(allowCancel: boolean): Promise<AccountInfo> {
-  const accountInfo = await prompt ([
+  const loginInfo = await prompt ([
     {
       type: 'input',
       name: 'identifier',
@@ -114,33 +123,32 @@ async function ask_account_info(allowCancel: boolean): Promise<AccountInfo> {
       name: 'password',
       message: 'password:'
     }
-  ]) as AccountInfo
+  ]) as { identifier: string, password: string }
 
-  console.log("testing password by connecting to bluesky")
+  console.log("connecting to bluesky")
   try {
     const agent = new AtpAgent({
       service: "https://bsky.social",
     });
-    await agent.login(accountInfo);
+    const resp =  await agent.login(loginInfo);
+
+    console.log("credentials confirmed")
+    return { handle: resp.data.handle, did: resp.data.did, password: loginInfo.password }
+
   } catch {
-    if (allowCancel) {
-      console.log('connection unsuccesful')
-      const { again } = await prompt({
-        type: 'confirm',
-        name: 'again',
-        message: 'try again?'
-      }) as { again: boolean };
+    console.log('connection unsuccesful. you probably have an invalid username or password')
+    const { again } = await prompt({
+      type: 'confirm',
+      name: 'again',
+      message: 'try again?'
+    }) as { again: boolean };
 
-      if (!again) { process.exit(0) }
+    if (!again) {
+      process.exit(0)
     } else {
-      console.log("username/password invalid. try again")
+      return ask_account_info(allowCancel)
     }
-
-    return ask_account_info(allowCancel)
   }
-
-  console.log("credentials confirmed")
-  return accountInfo
 }
 
 async function add_account(firstRun?: boolean): Promise<AccountInfo> {
@@ -170,13 +178,13 @@ async function remove_account() {
   const { accounts } = load_auth()
   const { removing } = await prompt({
     type: 'select',
-    choices: accounts.map((acc) => (acc.identifier)),
+    choices: accounts.map((acc) => (acc.handle)),
     initial: 0,
     name: 'removing',
     message: 'select account to remove'
   }) as { removing: string }
 
-  const newAccounts = accounts.filter((acc) => (acc.identifier != removing))
+  const newAccounts = accounts.filter((acc) => (acc.handle != removing))
   writeJson(authLocation, newAccounts)
   process.exit(0)
 }
@@ -233,7 +241,8 @@ async function makePost(
   const agent = new AtpAgent({
     service: "https://bsky.social",
   });
-  await agent.login(get_active_account(auth));
+  const account = get_active_account(auth)
+  await agent.login({ identifier: account.did, password: account.password });
 
   // compose post record
   const post_record: AppBskyFeedPost.Record = {
@@ -302,8 +311,13 @@ function makeCommand(
       const response = await prompt({
         type: 'input',
         name: 'text',
-        message: `${auth.currentlyActive}>`
+        message: `${get_active_account(auth).handle}>`
       }) as { text: string };
+
+      // prevent the user from uploading blank strings
+      if (response.text.trim() == '') {
+        process.exit(0)
+      }
 
       const baseData: PostData = {
         text: response.text ,
