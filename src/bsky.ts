@@ -1,4 +1,12 @@
-import { AtpAgentLoginOpts, BlobRef, BskyAgent } from "@atproto/api";
+import {
+  AtpAgentLoginOpts,
+  BlobRef,
+  AtpAgent,
+  AppBskyFeedPost,
+  AppBskyEmbedImages,
+  AppBskyEmbedRecord,
+  AppBskyEmbedRecordWithMedia,
+} from "@atproto/api";
 import fs from "node:fs";
 import os from "node:os";
 import { Argument, Command } from "commander";
@@ -110,7 +118,7 @@ async function ask_account_info(allowCancel: boolean): Promise<AccountInfo> {
 
   console.log("testing password by connecting to bluesky")
   try {
-    const agent = new BskyAgent({
+    const agent = new AtpAgent({
       service: "https://bsky.social",
     });
     await agent.login(accountInfo);
@@ -178,7 +186,7 @@ function load_history(): LocationInfo {
 }
 
 // upload images blobs and return the, uh, idk what to call it. app.bsky.embed.image record?
-async function image_embed(images: string[], agent: BskyAgent) {
+async function image_embed(images: string[], agent: AtpAgent): Promise<AppBskyEmbedImages.Main> {
   const blobs: BlobRef[] = []; //ew
   for (const image of images) {
     // check that image mimetype is valid
@@ -204,7 +212,7 @@ async function image_embed(images: string[], agent: BskyAgent) {
   };
 }
 
-function quote_embed(quoting: PostRef) {
+function quote_embed(quoting: PostRef): AppBskyEmbedRecord.Main {
   return {
     $type: "app.bsky.embed.record",
     record: quoting,
@@ -222,16 +230,16 @@ async function makePost(
   auth: AuthInfo
 ): Promise<void> {
   // login to bsky
-  const agent = new BskyAgent({
+  const agent = new AtpAgent({
     service: "https://bsky.social",
   });
   await agent.login(get_active_account(auth));
 
   // compose post record
-  const post_record: any = {
+  const post_record: AppBskyFeedPost.Record = {
     text: text,
     createdAt: new Date().toISOString(),
-  }; // we can apparently use "{defn} as {typedef}" here and include types. im taking the lazy route.
+  };
 
   if (replying_to !== undefined) {
     post_record.reply = {
@@ -247,7 +255,7 @@ async function makePost(
       $type: "app.bsky.embed.recordWithMedia",
       record: quote_embed(quoting),
       media: await image_embed(images, agent),
-    };
+    } as AppBskyEmbedRecordWithMedia.Main ;
   } else if (quoting !== undefined) {
     post_record.embed = quote_embed(quoting);
   } else if (image_post) {
@@ -255,6 +263,11 @@ async function makePost(
   }
 
   // post
+  const validationResult = AppBskyFeedPost.validateRecord(post_record)
+  if (!validationResult.success) {
+    exit("post record validation failed: " + validationResult.error)
+  }
+
   let result = await agent.post(post_record);
 
   // make data for saving
