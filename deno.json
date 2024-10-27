@@ -1,7 +1,4 @@
 {
-  "tasks": {
-    "dev": "deno run --watch main.ts"
-  },
   "imports": {
     "@atproto/api": "npm:@atproto/api@^0.13.12",
     "commander": "npm:commander@^12.1.0",

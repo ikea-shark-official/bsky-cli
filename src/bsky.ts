@@ -271,7 +271,7 @@ async function makePost(
 
 const program = new Command();
 program
-  .version("1.0.0")
+  .version("0.1.0")
   .description("A CLI tool for creating posts");
 
 function makeCommand(
