@@ -37,7 +37,7 @@ const authLocation = configDir + "/auth.json";
 const authStatusLocation = configDir + "/account_status.json"
 
 type AccountInfo = { handle: string, did: string, password: string };
-type AuthStatus = { currentDid: string, lastAccountDid: string } // stored in account_status.json
+type AuthStatus = { currentDid: string, lastAccountDid?: string } // stored in account_status.json
 
 type AuthInfo = { accounts: AccountInfo[] } & AuthStatus
 
@@ -47,8 +47,7 @@ async function first_run() {
 
   const accountInfo = await add_account(true)
   const authStatus: AuthStatus = {
-    currentDid: accountInfo.did,
-    lastAccountDid: accountInfo.did
+    currentDid: accountInfo.did
   }
   writeJson(authStatusLocation, authStatus)
   process.exit(0)
@@ -75,19 +74,21 @@ function change_active_account(newHandle: string | undefined) {
   const authInfo = load_auth()
   const prev: AuthStatus = authInfo
 
-  const nextDid = newHandle != undefined
-    ? get_did_by_handle(authInfo, newHandle)
-    : prev.lastAccountDid
-
-  const next: Partial<AuthStatus> = { currentDid: nextDid };
+  // if the new handle is given, switch to that
+  // otherwise, switch to the last account used
+  // if that doesn't exist, quit with an error message
+  var nextDid: string
+  if (newHandle != undefined) {
+    nextDid = get_did_by_handle(authInfo, newHandle)
+  } else if (prev.lastAccountDid != undefined) {
+    nextDid = prev.lastAccountDid
+  } else {
+    exit("`bsky switch` switches to the last account used but you don't seem to have a last account used.\n try switching to an account using its handle")
+  }
+  const next: AuthStatus = { currentDid: nextDid };
 
   if (next.currentDid == prev.currentDid) {
     exit("you are already using " + newHandle);
-  }
-
-  // switch to the last account we used if nothing is given
-  if (next.currentDid == undefined) {
-    next.currentDid = prev.lastAccountDid;
   }
 
   const dids: string[] = authInfo.accounts.map((acc) => (acc.did))
@@ -186,6 +187,7 @@ async function remove_account() {
 
   const newAccounts = accounts.filter((acc) => (acc.handle != removing))
   writeJson(authLocation, newAccounts)
+  console.log(`removed ${removing} from account list`)
   process.exit(0)
 }
 
