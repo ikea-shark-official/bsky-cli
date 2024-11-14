@@ -30,18 +30,6 @@ type AuthStatus = { currentDid: string, lastAccountDid?: string } // stored in a
 
 type AuthInfo = { accounts: AccountInfo[] } & AuthStatus
 
-async function first_run() {
-  fs.mkdirSync(configDir, { recursive: true })
-  fs.writeFileSync(historyLocation, '') // history file is just empty
-
-  const accountInfo = await add_account(true)
-  const authStatus: AuthStatus = {
-    currentDid: accountInfo.did
-  }
-  writeJson(authStatusLocation, authStatus)
-  process.exit(0)
-}
-
 function get_handle_by_did({accounts}: AuthInfo, did: string) {
   return accounts.filter((a) => (a.did == did))[0].handle
 }
@@ -69,25 +57,28 @@ function load_auth(): AuthInfo {
 
 /* ------------------------------------------------------------ */
 
-function change_active_account(newHandle: string | undefined) {
+async function select_account_dialog(auth: AuthInfo, message: string): Promise<AccountInfo> {
+  const { removing } = await prompt({
+    type: 'select',
+    choices: auth.accounts.map((acc) => (acc.handle)),
+    initial: 0,
+    name: 'removing',
+    message: message
+  }) as { removing: string }
+
+  return auth.accounts.filter(acc => acc.handle == removing)[0]
+}
+
+async function change_active_account() {
   const authInfo = load_auth()
   const prev: AuthStatus = authInfo
 
-  // if the new handle is given, switch to that
-  // otherwise, switch to the last account used
-  // if that doesn't exist, quit with an error message
-  let nextDid: string
-  if (newHandle != undefined) {
-    nextDid = get_did_by_handle(authInfo, newHandle)
-  } else if (prev.lastAccountDid != undefined) {
-    nextDid = prev.lastAccountDid
-  } else {
-    exit("`bsky switch` switches to the last account used but you don't seem to have a last account used.\n try switching to an account using its handle")
-  }
-  const next: AuthStatus = { currentDid: nextDid };
+  const nextAccount = await select_account_dialog(authInfo, "select new account")
+
+  const next: AuthStatus = { currentDid: nextAccount.did };
 
   if (next.currentDid == prev.currentDid) {
-    exit("you are already using " + newHandle);
+    exit("you are already using " + nextAccount.handle);
   }
 
   const dids: string[] = authInfo.accounts.map((acc) => (acc.did))
@@ -111,7 +102,7 @@ function list_accounts() {
   }
 }
 
-async function ask_account_info(allowCancel: boolean): Promise<AccountInfo> {
+async function ask_new_account(): Promise<AccountInfo> {
   const loginInfo = await prompt ([
     {
       type: 'input',
@@ -126,6 +117,7 @@ async function ask_account_info(allowCancel: boolean): Promise<AccountInfo> {
   ]) as { identifier: string, password: string }
 
   console.log("connecting to bluesky")
+
   try {
     const agent = new AtpAgent({
       service: "https://bsky.social",
@@ -146,45 +138,29 @@ async function ask_account_info(allowCancel: boolean): Promise<AccountInfo> {
     if (!again) {
       process.exit(0)
     } else {
-      return ask_account_info(allowCancel)
+      return ask_new_account()
     }
   }
 }
 
-async function add_account(firstRun?: boolean): Promise<AccountInfo> {
-  firstRun = (firstRun != undefined) ? firstRun : false
-
-  // we don't want the user to be able to quit on the first run and fuck it up
-  const allowExiting = firstRun? false : true
-  const accountInfo = await ask_account_info(allowExiting)
-
+/** Add the given account to auth.json, creating the file if it doesn't exist */
+function add_account(account: AccountInfo): void {
   let accounts: AccountInfo[]
-  if (firstRun) {
+  if (!fs.existsSync(authLocation)) {
     accounts = []
   } else {
     ({ accounts } = load_auth())
   }
 
-  accounts.push(accountInfo)
+  accounts.push(account)
   writeJson(authLocation, accounts)
-  if (firstRun) {
-    return accountInfo
-  } else {
-    process.exit(0)
-  }
 }
 
 async function remove_account() {
-  const { accounts } = load_auth()
-  const { removing } = await prompt({
-    type: 'select',
-    choices: accounts.map((acc) => (acc.handle)),
-    initial: 0,
-    name: 'removing',
-    message: 'select account to remove'
-  }) as { removing: string }
+  const auth = load_auth()
+  const removing = (await select_account_dialog(auth, 'select account to remove'))
 
-  const newAccounts = accounts.filter((acc) => (acc.handle != removing))
+  const newAccounts = auth.accounts.filter((acc) => (acc.handle != removing.handle))
   writeJson(authLocation, newAccounts)
   console.log(`removed ${removing} from account list`)
   process.exit(0)
@@ -203,8 +179,6 @@ async function bsky_login(auth: AuthInfo): Promise<AtpAgent> {
   return agent
 }
 
-/* ------------------------------------------------------------ */
-
 async function post(postData: PostData, auth: AuthInfo){
   const agent = await bsky_login(auth)
   const result = await makePost(postData, agent)
@@ -221,6 +195,26 @@ async function post(postData: PostData, auth: AuthInfo){
 }
 
 /* ------------------------------------------------------------ */
+
+async function first_run() {
+  // get user data first, so we don't make stuff if logging in fails
+  const accountInfo = await ask_new_account()
+
+  fs.mkdirSync(configDir, { recursive: true })
+  fs.writeFileSync(historyLocation, '') // history file is just empty
+  add_account(accountInfo)
+  const authStatus: AuthStatus = {
+    currentDid: accountInfo.did
+  }
+  writeJson(authStatusLocation, authStatus)
+  process.exit(0)
+}
+
+const configFiles = [configDir, authLocation, historyLocation, authStatusLocation]
+if (!configFiles.every(fs.existsSync)) {
+  first_run()
+}
+
 
 const program = new Command();
 program
@@ -282,16 +276,12 @@ program
   .command('accounts')
   .addArgument(new Argument('[command]').choices(['add', 'remove']))
   .description("list accounts, or add/remove with 'accounts [add/remove]'")
-  .action((command) => {
+  .action(async (command) => {
     if (command == undefined) {
       list_accounts()
     } else if (command == 'add') {
-      const configFiles = [configDir, authLocation, historyLocation, authStatusLocation]
-      if (configFiles.every(fs.existsSync)) {
-        add_account() // standard account adding procedure
-      } else {
-        first_run()
-      }
+      const account = await ask_new_account()
+      add_account(account)
     } else if (command == 'remove') {
       remove_account()
     }
