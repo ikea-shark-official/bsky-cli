@@ -20,15 +20,17 @@ function writeJson<T>(path: string, value:T): void {
 
 /* ------------------------------------------------------------ */
 
-const configDir = os.homedir() + "/.bsky-cli";
-const historyLocation = configDir + "/post_history.json";
-const authLocation = configDir + "/auth.json";
-const authStatusLocation = configDir + "/account_status.json"
+const configFile = os.homedir() + "/.bsky-cli";
 
 type AccountInfo = { handle: string, did: string, password: string };
 type AuthStatus = { currentDid: string, lastAccountDid?: string } // stored in account_status.json
 
 type AuthInfo = { accounts: AccountInfo[] } & AuthStatus
+
+type BskyConfig = {
+  auth: AuthInfo,
+  history?: LocationInfo
+}
 
 function get_handle_by_did({accounts}: AuthInfo, did: string) {
   return accounts.filter((a) => (a.did == did))[0].handle
@@ -41,18 +43,13 @@ function get_active_account({accounts, currentDid}: AuthInfo): AccountInfo {
   return accounts.filter((a) => (a.did == currentDid))[0];
 }
 
-function load_history(): LocationInfo {
-  return readJson(historyLocation)
+function load_config(): BskyConfig {
+  return readJson(configFile)
 }
 
-function write_history(history: LocationInfo): void {
-  writeJson(historyLocation, history)
-}
-
-function load_auth(): AuthInfo {
-  const authInfo: AccountInfo[] = readJson(authLocation)
-  const authStatus: AuthStatus = readJson(authStatusLocation)
-  return { accounts: authInfo, ...authStatus }
+function write_config({auth, history}: BskyConfig): void {
+  const config: BskyConfig = { auth: auth, history: history}
+  return writeJson(configFile, config)
 }
 
 /* ------------------------------------------------------------ */
@@ -69,11 +66,10 @@ async function select_account_dialog(auth: AuthInfo, message: string): Promise<A
   return auth.accounts.filter(acc => acc.handle == removing)[0]
 }
 
-async function change_active_account() {
-  const authInfo = load_auth()
-  const prev: AuthStatus = authInfo
+async function change_active_account(auth: AuthInfo): Promise<AuthInfo> {
+  const prev: AuthStatus = auth
 
-  const nextAccount = await select_account_dialog(authInfo, "select new account")
+  const nextAccount = await select_account_dialog(auth, "select new account")
 
   const next: AuthStatus = { currentDid: nextAccount.did };
 
@@ -81,23 +77,23 @@ async function change_active_account() {
     exit("you are already using " + nextAccount.handle);
   }
 
-  const dids: string[] = authInfo.accounts.map((acc) => (acc.did))
+  const dids: string[] = auth.accounts.map((acc) => (acc.did))
   if (!dids.includes(next.currentDid)) {
     exit("given account name not found in auth.json")
   }
 
   next.lastAccountDid = prev.currentDid
 
-  writeJson(authStatusLocation, next as AuthStatus)
   console.log(
-    "switched account from " + get_handle_by_did(authInfo, prev.currentDid) +
-                      " to " + get_handle_by_did(authInfo, next.currentDid)
+    "switched account from " + get_handle_by_did(auth, prev.currentDid) +
+                      " to " + get_handle_by_did(auth, next.currentDid)
   );
+  return { accounts: auth.accounts, ...next }
 }
 
 // print active accounts to terminal, for `bsky accounts`
-function list_accounts() {
-  for (const account of load_auth().accounts) {
+function list_accounts(auth: AuthInfo) {
+  for (const account of auth.accounts) {
     console.log(account.handle)
   }
 }
@@ -143,27 +139,13 @@ async function ask_new_account(): Promise<AccountInfo> {
   }
 }
 
-/** Add the given account to auth.json, creating the file if it doesn't exist */
-function add_account(account: AccountInfo): void {
-  let accounts: AccountInfo[]
-  if (!fs.existsSync(authLocation)) {
-    accounts = []
-  } else {
-    ({ accounts } = load_auth())
-  }
-
-  accounts.push(account)
-  writeJson(authLocation, accounts)
-}
-
-async function remove_account() {
-  const auth = load_auth()
+async function remove_account(auth: AuthInfo): Promise<AuthInfo> {
   const removing = (await select_account_dialog(auth, 'select account to remove'))
 
   const newAccounts = auth.accounts.filter((acc) => (acc.handle != removing.handle))
-  writeJson(authLocation, newAccounts)
+
   console.log(`removed ${removing} from account list`)
-  process.exit(0)
+  return { ...auth, accounts: newAccounts }
 }
 
 /* ------------------------------------------------------------ */
@@ -179,64 +161,64 @@ async function bsky_login(auth: AuthInfo): Promise<AtpAgent> {
   return agent
 }
 
-async function post(postData: PostData, auth: AuthInfo){
+async function post(postData: PostData, auth: AuthInfo): Promise<LocationInfo> {
   const agent = await bsky_login(auth)
   const result = await makePost(postData, agent)
 
   // save post to history file
-  write_history({
+  return {
     post_info: result,
     thread_root:
       // thread root is the parent of the chain we're replying if there's a chain, us if not
       postData.replying_to !== undefined
         ? postData.replying_to.thread_root
         : result,
-  })
+  }
 }
 
 /* ------------------------------------------------------------ */
 
 async function first_run() {
-  // get user data first, so we don't make stuff if logging in fails
-  const accountInfo = await ask_new_account()
+  // get user data first, so we don't make a file if logging in fails
+  console.log("welcome to bluesky-cli! please enter your username/app password to get started")
+  const account = await ask_new_account()
 
-  fs.mkdirSync(configDir, { recursive: true })
-  fs.writeFileSync(historyLocation, '') // history file is just empty
-  add_account(accountInfo)
-  const authStatus: AuthStatus = {
-    currentDid: accountInfo.did
-  }
-  writeJson(authStatusLocation, authStatus)
-  process.exit(0)
+  writeJson<BskyConfig>(configFile, {
+    auth: {
+      accounts: [account],
+      currentDid: account.did
+    }
+  })
 }
 
-const configFiles = [configDir, authLocation, historyLocation, authStatusLocation]
-if (!configFiles.every(fs.existsSync)) {
-  first_run()
+const needsFirstRun = !fs.existsSync(configFile)
+async function run_initial_setup_if_needed() {
+  if (needsFirstRun)
+    await first_run()
 }
-
 
 const program = new Command();
 program
-  .version("0.1.0")
+  .version("0.1")
   .description("A CLI tool for creating posts");
 
 function makeCommand(
   name: string,
   description: string,
-  extraData: () => Partial<PostData>,
+  extraData: (config: BskyConfig) => Partial<PostData>,
 ) {
   program
     .command(`${name}`)
     .description(description)
     // .option("-i, --image <path>", "path of image to upload", collect, [])
     .action(async (_options) => {
-      const auth = load_auth()
+      await run_initial_setup_if_needed()
+      const config = load_config()
 
       const response = await prompt({
         type: 'input',
         name: 'text',
-        message: `${get_active_account(auth).handle}>`
+        message: `${get_active_account(config.auth).handle}>`
       }) as { text: string };
 
       // prevent the user from uploading blank strings
@@ -248,46 +230,76 @@ function makeCommand(
         text: response.text ,
       };
 
-      await post({ ...baseData, ...extraData() }, auth);
-      process.exit(0) // TODO, is this the best way to handle this?
+      await post({ ...baseData, ...extraData(config) }, config.auth);
     })
+}
+
+function require_history(history: LocationInfo | undefined): LocationInfo {
+  if (history == undefined)
+    exit("you're trying to quote/reply to the latest post but you haven't made a post yet")
+  return history
 }
 
 makeCommand("post", "create a new post", () => ({}));
 makeCommand(
   "append",
   "reply to the last created post",
-  () => ({ replying_to: load_history() }),
+  ({ history }) => ({ replying_to: require_history(history) }),
 );
 makeCommand(
   "quote",
   "quote the last created post",
-  () => ({ quoting: load_history().post_info }),
+  ({ history }) => ({ quoting: require_history(history).post_info }),
 );
 
 program
   .command("switch [account]")
-  .description(
-    "switch to the named account, or the last one used if unspecified",
-  )
-  .action(change_active_account);
+  .description("switch to the named account, or the last one used if unspecified")
+  .action(async () => {
+    await run_initial_setup_if_needed()
+    let { auth, history } = load_config()
+    auth = await change_active_account(auth)
+    write_config( { auth, history })
+  });
 
 program
   .command('accounts')
   .addArgument(new Argument('[command]').choices(['add', 'remove']))
   .description("list accounts, or add/remove with 'accounts [add/remove]'")
   .action(async (command) => {
+    let { auth, history } = load_config()
+
     if (command == undefined) {
-      list_accounts()
+      await run_initial_setup_if_needed()
+      list_accounts(auth)
+
     } else if (command == 'add') {
+      if (needsFirstRun)
+        return (first_run())
+
       const account = await ask_new_account()
-      add_account(account)
+      auth.accounts.push(account)
+      write_config({ auth, history })
+
     } else if (command == 'remove') {
-      remove_account()
+      await run_initial_setup_if_needed()
+      auth = await remove_account(auth)
+      write_config({ auth, history })
     }
   })
 
-program.parse(process.argv);
+program
+  .command('init')
+  .description('log in to an account')
+  .action(() => {
+    if (!needsFirstRun) {
+      exit("account already setup.\n if you want to reset the program, remove ~/.bsky-cli and call `bsky init` again")
+    }
+
+    return first_run()
+  })
+
+await program.parseAsync(process.argv);
 
 // If no command is provided, show help
 if (!process.argv.slice(2).length) {
