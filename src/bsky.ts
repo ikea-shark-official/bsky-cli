@@ -1,6 +1,7 @@
 import { AtpAgent } from "@atproto/api";
 import fs from "node:fs";
 import os from "node:os";
+import path from "node:path"
 import { Argument, Command } from "commander";
 import process from "node:process";
 import enquirer from "enquirer";
@@ -20,7 +21,10 @@ function writeJson<T>(path: string, value:T): void {
 
 /* ------------------------------------------------------------ */
 
-const configFile = os.homedir() + "/.bsky-cli";
+const configFile =
+  (os.type() == 'Windows_NT')
+  ? path.join(os.homedir(), "AppData", "Roaming", ".bsky-cli.json")
+  : path.join(os.homedir(), ".bsky-cli")
 
 type AccountInfo = { handle: string, did: string, password: string };
 type AuthStatus = { currentDid: string, lastAccountDid?: string } // stored in account_status.json
