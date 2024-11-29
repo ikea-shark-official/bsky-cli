@@ -4,15 +4,15 @@ import path from "node:path"
 import process from "node:process";
 import { exec } from 'node:child_process';
 import { Buffer } from "node:buffer";
+import { isText } from 'npm:istextorbinary';
+import { fileTypeFromBuffer } from 'npm:file-type'
 import { AtpAgent } from "npm:@atproto/api";
 import { Command } from "npm:commander";
 import enquirer from "npm:enquirer";
 const { prompt } = enquirer;
-// import { fileTypeFromBuffer } from "npm:file-type"
 
-import { exhaustive_match, exit } from "./common.ts";
+import { exit } from "./common.ts";
 import { LocationInfo, PostData, ImageData, MediaData, ReplyData, makePost } from "./post.ts";
-
 
 /* ------------------------------------------------------------ */
 
@@ -124,25 +124,24 @@ function read_clipboard(): Promise<Buffer> {
   }
 }
 
-async function ask_for_images(): Promise<ImageData[]> {
-  const images: ImageData[] = []
-  // TODO: get initial image confirmation
-  while (true) {
-    // get file/determine mimetype
-    const data = await read_clipboard()
-    const mimetype = 'image/png'
-    images.push({ data, mimetype })
+async function get_image(): Promise<ImageData> {
+  const clipboard_contents = await read_clipboard()
 
-    // ask if we want to go again, return images if not
-    const { repeat } = await prompt({
-      type: 'confirm',
-      name: 'repeat',
-      message: "Do you want to add another?",
-    }) as { repeat: boolean }
-
-    if (!repeat || images.length >= 4)
-      return images
+  let data: Buffer
+  if (isText(null, clipboard_contents)) {
+    const location = ('' + clipboard_contents).trim()
+    if (!fs.existsSync(location)) { exit('no file in clipboard') }
+    data = fs.readFileSync(location)
+  } else {
+    data = clipboard_contents
   }
+
+  const filetype = await fileTypeFromBuffer(data)
+  if (filetype == undefined) { exit("Couldn't detect mimetype from file in clipboard") }
+  const mimetype = filetype.mime
+
+  if (mimetype.split('/')[0] != 'image') { exit('File in clipboard does not have an image mimetype') }
+  return { data, mimetype }
 }
 
 /* ------------------------------------------------------------ */
@@ -192,11 +191,18 @@ function makeCommand(
   program
     .command(`${name}`)
     .description(description)
-    .option("-i, --attach-image", "attach one or more images")
+    .option("--paste", "attach one or more images from the clipboard")
     .action(async (options) => {
       await run_initial_setup_if_needed()
       const config = load_config()
       const session = bsky_login(config.auth)
+
+      // if --paste is called, copy an image from the clipboard
+      // we do it right at the start, so it'll hopefully be less likely to catch fake data
+      let image: Promise<ImageData>
+      if (options.paste) {
+        image = get_image()
+      }
 
       const response = await prompt({
         type: 'input',
@@ -210,17 +216,14 @@ function makeCommand(
       }
 
       let media_info: MediaData
-      if (options.attachImage) {
-        const images = await ask_for_images()
-        if (images.length == 0) {
-          media_info = { media_type: 'no-media' }
-        }
-        media_info = { media_type: 'image', images }
+      if (options.paste) {
+        media_info = { media_type: 'image', images: [await image!] }
       } else {
         media_info = { media_type: 'no-media' }
       }
 
       const [agent, { handle }] = await session
+      // update handle in order to keep the prompt in check
       config.auth.handle = handle
 
       const lastPost = await post(

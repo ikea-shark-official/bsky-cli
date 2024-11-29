@@ -16,7 +16,7 @@ type LocationInfo = { post_info: PostRef; thread_root: PostRef };
 
 type ImageData = { data: Buffer, mimetype: string }
 
-// upload images blobs and return the image embed record
+// upload image blobs and return an image embed record for them
 async function image_embed(images: ImageData[], agent: AtpAgent): Promise<AppBskyEmbedImages.Main> {
   const blobs: BlobRef[] = [];
   for (const { data, mimetype } of images) {
