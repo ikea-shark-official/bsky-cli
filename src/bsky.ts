@@ -1,14 +1,17 @@
-import { AtpAgent } from "@atproto/api";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path"
-import { Command } from "commander";
 import process from "node:process";
-import enquirer from "enquirer";
+import { exec } from 'node:child_process';
+import { Buffer } from "node:buffer";
+import { AtpAgent } from "npm:@atproto/api";
+import { Command } from "npm:commander";
+import enquirer from "npm:enquirer";
 const { prompt } = enquirer;
+// import { fileTypeFromBuffer } from "npm:file-type"
 
-import { exit } from "./common.ts";
-import { LocationInfo, PostData, makePost } from "./post.ts";
+import { exhaustive_match, exit } from "./common.ts";
+import { LocationInfo, PostData, ImageData, makePost } from "./post.ts";
 
 
 /* ------------------------------------------------------------ */
@@ -70,7 +73,7 @@ async function ask_new_account(): Promise<AccountInfo> {
       message: 'username'
     },
     {
-      type: 'invisible',
+      type: 'password',
       name: 'password',
       message: 'password:'
     }
@@ -105,6 +108,45 @@ async function ask_new_account(): Promise<AccountInfo> {
 
 /* ------------------------------------------------------------ */
 
+function read_command_to_buffer(cmd: string): Promise<Buffer> {
+  return new Promise((resolve, _reject) => {
+    exec(cmd, { encoding: 'buffer' }, (_err, stdout, _stderr) => {
+      resolve(stdout)
+    })
+  })
+}
+
+function read_clipboard(): Promise<Buffer> {
+  if (os.platform() == 'linux') {
+    return (read_command_to_buffer('wl-paste'))
+  } else {
+    exit('pasting from the clipboard is not supported on your platform')
+  }
+}
+
+async function ask_for_images(): Promise<ImageData[]> {
+  const images: ImageData[] = []
+  // TODO: get initial image confirmation
+  while (true) {
+    // get file/determine mimetype
+    const data = await read_clipboard()
+    const mimetype = 'image/png'
+    images.push({ data, mimetype })
+
+    // ask if we want to go again, return images if not
+    const { repeat } = await prompt({
+      type: 'confirm',
+      name: 'repeat',
+      message: "Do you want to add another?",
+    }) as { repeat: boolean }
+
+    if (!repeat || images.length >= 4)
+      return images
+  }
+}
+
+/* ------------------------------------------------------------ */
+
 async function post(postData: PostData, { agent }: BskyObjects): Promise<LocationInfo> {
   const result = await makePost(postData, agent)
 
@@ -123,7 +165,7 @@ async function post(postData: PostData, { agent }: BskyObjects): Promise<Locatio
 
 async function first_run() {
   // get user data first, so we don't make a file if logging in fails
-  console.log("welcome to bluesky-cli! please enter your username/app password to get started")
+  console.log("welcome! please enter your username/app password to get started")
   const account = await ask_new_account()
 
   writeJson<BskyConfig>(configFile, {
@@ -150,7 +192,8 @@ function makeCommand(
   program
     .command(`${name}`)
     .description(description)
-    .action(async (_options) => {
+    .option("-i, --attach-image", "attach one or more images")
+    .action(async (options) => {
       await run_initial_setup_if_needed()
       const config = load_config()
       const session = bsky_login(config.auth)
@@ -166,8 +209,14 @@ function makeCommand(
         process.exit(0)
       }
 
+      const images: ImageData[] | undefined =
+        options.attachImage
+        ? await ask_for_images()
+        : undefined
+
       const baseData: PostData = {
-        text: response.text ,
+        text: response.text,
+        images: images
       };
 
       const [agent, { handle }] = await session

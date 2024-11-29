@@ -6,31 +6,25 @@ import {
   AppBskyEmbedRecord,
   AppBskyEmbedRecordWithMedia,
 } from "@atproto/api";
-import mime from "mime";
-import path from "node:path";
-import fs from "node:fs";
+import { Buffer } from "node:buffer";
+
 import { exit } from './common.ts';
-export { type PostRef, type LocationInfo, type PostData, makePost}
+export { type PostRef, type LocationInfo, type PostData, type ImageData, makePost}
 
 type PostRef = { uri: string; cid: string };
 type LocationInfo = { post_info: PostRef; thread_root: PostRef };
 
-// upload images blobs and return the, uh, idk what to call it. app.bsky.embed.image record?
-async function image_embed(images: string[], agent: AtpAgent): Promise<AppBskyEmbedImages.Main> {
-  const blobs: BlobRef[] = []; //ew
-  for (const image of images) {
-    // check that image mimetype is valid
-    const mimetype = mime.getType(path.basename(image));
-    if (mimetype === null) {
-      exit("mimetype not found for " + image + ". check that it has an image extension");
-    } else if (mimetype.split("/")[0] !== "image") {
-      exit("invalid mimetype for an image post: " + mimetype);
-    }
+type ImageData = { data: Buffer, mimetype: string }
+
+// upload images blobs and return the image embed record
+async function image_embed(images: ImageData[], agent: AtpAgent): Promise<AppBskyEmbedImages.Main> {
+  const blobs: BlobRef[] = [];
+  for (const { data, mimetype } of images) {
     // strip image metadata
     // check that image is valid, try to resize if not
 
     // post image blob
-    const blob_resp = await agent.uploadBlob(fs.readFileSync(image), { encoding: mimetype });
+    const blob_resp = await agent.uploadBlob(data, { encoding: mimetype });
     blobs.push(blob_resp.data.blob);
   }
 
@@ -53,7 +47,7 @@ interface PostData {
   text: string;
   replying_to?: LocationInfo;
   quoting?: PostRef;
-  images?: string[];
+  images?: ImageData[];
 }
 async function makePost(
   { text, replying_to, quoting, images }: PostData,
