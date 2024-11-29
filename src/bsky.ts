@@ -11,7 +11,7 @@ const { prompt } = enquirer;
 // import { fileTypeFromBuffer } from "npm:file-type"
 
 import { exhaustive_match, exit } from "./common.ts";
-import { LocationInfo, PostData, ImageData, makePost } from "./post.ts";
+import { LocationInfo, PostData, ImageData, MediaData, ReplyData, makePost } from "./post.ts";
 
 
 /* ------------------------------------------------------------ */
@@ -155,7 +155,7 @@ async function post(postData: PostData, { agent }: BskyObjects): Promise<Locatio
     post_info: result,
     thread_root:
       // thread root is the parent of the chain we're replying if there's a chain, us if not
-      postData.replying_to !== undefined
+      postData.reply_type == 'reply'
         ? postData.replying_to.thread_root
         : result,
   }
@@ -187,7 +187,7 @@ program
 function makeCommand(
   name: string,
   description: string,
-  extraData: (config: BskyConfig) => Partial<PostData>,
+  reply_info: (config: BskyConfig) => ReplyData,
 ) {
   program
     .command(`${name}`)
@@ -209,20 +209,28 @@ function makeCommand(
         process.exit(0)
       }
 
-      const images: ImageData[] | undefined =
-        options.attachImage
-        ? await ask_for_images()
-        : undefined
-
-      const baseData: PostData = {
-        text: response.text,
-        images: images
-      };
+      let media_info: MediaData
+      if (options.attachImage) {
+        const images = await ask_for_images()
+        if (images.length == 0) {
+          media_info = { media_type: 'no-media' }
+        }
+        media_info = { media_type: 'image', images }
+      } else {
+        media_info = { media_type: 'no-media' }
+      }
 
       const [agent, { handle }] = await session
       config.auth.handle = handle
 
-      const lastPost = await post({ ...baseData, ...extraData(config) }, { agent });
+      const lastPost = await post(
+        {
+          text: response.text,
+          ...media_info,
+          ...reply_info(config)
+        },
+        { agent }
+      );
       write_config({ ...config, history: lastPost})
       process.exit(0)
     })
@@ -234,16 +242,22 @@ function require_history(history: LocationInfo | undefined): LocationInfo {
   return history
 }
 
-makeCommand("post", "create a new post", () => ({}));
+makeCommand("post", "create a new post", () => ({ reply_type: 'no-parent' }));
 makeCommand(
   "append",
   "reply to the last created post",
-  ({ history }) => ({ replying_to: require_history(history) }),
+  ({ history }) => (
+      { reply_type: 'reply'
+      , replying_to: require_history(history)
+      }),
 );
 makeCommand(
   "quote",
   "quote the last created post",
-  ({ history }) => ({ quoting: require_history(history).post_info }),
+  ({ history }) => (
+      { reply_type: 'quote'
+      , quoting: require_history(history).post_info
+      }),
 );
 
 program
