@@ -105,8 +105,7 @@ async function ask_new_account(): Promise<AccountInfo> {
 
 /* ------------------------------------------------------------ */
 
-async function post(postData: PostData, auth: AccountInfo): Promise<LocationInfo> {
-  const [agent, _] = await bsky_login(auth)
+async function post(postData: PostData, { agent }: BskyObjects): Promise<LocationInfo> {
   const result = await makePost(postData, agent)
 
   // save post to history file
@@ -151,10 +150,10 @@ function makeCommand(
   program
     .command(`${name}`)
     .description(description)
-    // .option("-i, --image <path>", "path of image to upload", collect, [])
     .action(async (_options) => {
       await run_initial_setup_if_needed()
       const config = load_config()
+      const session = bsky_login(config.auth)
 
       const response = await prompt({
         type: 'input',
@@ -171,8 +170,12 @@ function makeCommand(
         text: response.text ,
       };
 
-      const lastPost = await post({ ...baseData, ...extraData(config) }, config.auth);
+      const [agent, { handle }] = await session
+      config.auth.handle = handle
+
+      const lastPost = await post({ ...baseData, ...extraData(config) }, { agent });
       write_config({ ...config, history: lastPost})
+      process.exit(0)
     })
 }
 
@@ -202,7 +205,8 @@ program
       exit("account already setup.\n if you want to reset the program, remove ~/.bsky-cli and call `bsky init` again")
     }
 
-    return first_run()
+    first_run()
+    process.exit(0)
   })
 
 await program.parseAsync(process.argv);
