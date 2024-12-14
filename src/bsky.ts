@@ -282,6 +282,7 @@ function makeCommand(
     .command(`${name}`)
     .description(description)
     .option("--paste", "attach one or more images from the clipboard")
+    .option("--dry-run", "print generated post instead of posting it")
     .action(async (options) => {
       await run_initial_setup_if_needed()
       const config = load_config()
@@ -316,14 +317,19 @@ function makeCommand(
       // update handle in order to keep the prompt in check
       config.auth.handle = handle
 
-      const lastPost = await post(
+      const postObject =
         {
           text: response.text,
           ...media_info,
           ...reply_info(config)
-        },
-        { agent }
-      );
+        }
+
+      if (options.dryRun) {
+        console.log(postObject)
+        process.exit(0)
+      }
+
+      const lastPost = await post(postObject, { agent });
       write_config({ ...config, history: lastPost})
       process.exit(0)
     })
