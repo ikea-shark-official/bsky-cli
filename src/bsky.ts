@@ -5,7 +5,7 @@ import process from "node:process";
 import { exec } from 'node:child_process';
 import { Buffer } from "node:buffer";
 import { isText } from 'npm:istextorbinary';
-import { fileTypeFromBuffer } from 'npm:file-type'
+import { fileTypeFromBuffer, fileTypeFromFile } from 'npm:file-type'
 import {
   BlobRef,
   AtpAgent,
@@ -16,6 +16,7 @@ import {
 } from "@atproto/api";
 import { Command } from "npm:commander";
 import enquirer from "npm:enquirer";
+import { FileTypeResult } from "file-type";
 const { prompt } = enquirer;
 
 /* ------------------------------------------------------------ */
@@ -43,10 +44,10 @@ const configFile =
   ? path.join(os.homedir(), "AppData", "Roaming", ".bsky-cli.json")
   : path.join(os.homedir(), ".bsky-cli")
 
-type AccountInfo = { handle: string, did: string, password: string };
+type Auth = { handle: string, did: string, password: string };
 
 type BskyConfig = {
-  auth: AccountInfo,
+  auth: Auth,
   history?: LocationInfo
 }
 
@@ -67,8 +68,7 @@ function write_config({auth, history}: BskyConfig): void {
 
 /* ------------------------------------------------------------ */
 
-
-async function bsky_login(account: AccountInfo): Promise<[AtpAgent, AccountInfo]> {
+async function bsky_login(account: Auth): Promise<[AtpAgent, Auth]> {
   // login to bsky
   const agent = new AtpAgent({
     service: "https://bsky.social",
@@ -78,7 +78,7 @@ async function bsky_login(account: AccountInfo): Promise<[AtpAgent, AccountInfo]
   return [agent, { ...account, handle: res.data.handle }]
 }
 
-async function ask_new_account(): Promise<AccountInfo> {
+async function ask_new_account(): Promise<Auth> {
   const loginInfo = await prompt ([
     {
       type: 'input',
@@ -130,7 +130,7 @@ async function get_post_text(handle: string): Promise<string> {
       message: handle
     }) as { text: string }
 
-    // keep going iff the last character of the given line is an escape char
+    // keep going iff the last character of the given line is an escape backslash
     if (text[text.length - 1] == '\\') {
       texts += text.slice(0, text.length - 1) + "\n"
     } else {
@@ -163,15 +163,17 @@ async function get_image(): Promise<ImageData> {
   const clipboard_contents = await read_clipboard()
 
   let data: Buffer
+  let filetype: FileTypeResult | undefined
   if (isText(null, clipboard_contents)) {
     const location = ('' + clipboard_contents).trim()
     if (!fs.existsSync(location)) { exit('no file in clipboard') }
     data = fs.readFileSync(location)
+    filetype = await fileTypeFromFile(location)
   } else {
     data = clipboard_contents
+    filetype = await fileTypeFromBuffer(data)
   }
 
-  const filetype = await fileTypeFromBuffer(data)
   if (filetype == undefined) { exit("Couldn't detect mimetype from file in clipboard") }
   const mimetype = filetype.mime
 
@@ -235,7 +237,7 @@ async function makePost(
     };
   }
 
-  const image_post = post.media_type == 'image'  && post.images.length > 0;
+  const image_post = post.media_type == 'image' && post.images.length > 0;
 
   if (post.reply_type == 'quote' && image_post) {
     post_record.embed = {
