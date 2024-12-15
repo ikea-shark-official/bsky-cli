@@ -13,6 +13,7 @@ import {
   AppBskyEmbedImages,
   AppBskyEmbedRecord,
   AppBskyEmbedRecordWithMedia,
+  RichText,
 } from "@atproto/api";
 import { Command } from "npm:commander";
 import enquirer from "npm:enquirer";
@@ -224,9 +225,14 @@ async function makePost(
   post: PostData,
   agent: AtpAgent
 ): Promise<PostRef> {
-  // compose post record
-  const post_record: AppBskyFeedPost.Record = {
+  const rt = new RichText({
     text: post.text,
+  })
+  await rt.detectFacets(agent)
+  const post_record: AppBskyFeedPost.Record = {
+    $type: 'app.bsky.feed.post',
+    text: rt.text,
+    facets: rt.facets,
     createdAt: new Date().toISOString(),
   };
 
