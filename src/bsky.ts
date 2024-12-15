@@ -121,6 +121,28 @@ async function ask_new_account(): Promise<AccountInfo> {
 
 /* ------------------------------------------------------------ */
 
+async function get_post_text(handle: string): Promise<string> {
+  let texts = ""
+  while(true) {
+    const { text } = await prompt({
+      type: 'text',
+      name: 'text',
+      message: handle
+    }) as { text: string }
+
+    // keep going iff the last character of the given line is an escape char
+    if (text[text.length - 1] == '\\') {
+      texts += text.slice(0, text.length - 1) + "\n"
+    } else {
+      texts += text
+      break
+    }
+  }
+  return texts
+}
+
+/* ------------------------------------------------------------ */
+
 function read_command_to_buffer(cmd: string): Promise<Buffer> {
   return new Promise((resolve, _reject) => {
     exec(cmd, { encoding: 'buffer' }, (_err, stdout, _stderr) => {
@@ -281,7 +303,7 @@ function makeCommand(
   program
     .command(`${name}`)
     .description(description)
-    .option("--paste", "attach one or more images from the clipboard")
+    .option("--paste", "attach an image stored in the clipboard")
     .option("--dry-run", "print generated post instead of posting it")
     .action(async (options) => {
       await run_initial_setup_if_needed()
@@ -295,14 +317,10 @@ function makeCommand(
         image = get_image()
       }
 
-      const response = await prompt({
-        type: 'input',
-        name: 'text',
-        message: `${config.auth.handle}>`
-      }) as { text: string };
+      const text = await get_post_text(config.auth.handle)
 
       // prevent the user from uploading blank strings
-      if (response.text.trim() == '') {
+      if (text.trim() == '') {
         process.exit(0)
       }
 
@@ -319,7 +337,7 @@ function makeCommand(
 
       const postObject =
         {
-          text: response.text,
+          text,
           ...media_info,
           ...reply_info(config)
         }
@@ -362,12 +380,12 @@ makeCommand(
 program
   .command('init')
   .description('log in to an account')
-  .action(() => {
+  .action(async () => {
     if (!needsFirstRun) {
       exit("account already setup.\n if you want to reset the program, remove ~/.bsky-cli and call `bsky init` again")
     }
 
-    first_run()
+    await first_run()
     process.exit(0)
   })
 
